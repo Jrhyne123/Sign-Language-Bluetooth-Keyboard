@@ -28,6 +28,7 @@ limitations under the License.
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "tensorflow/lite/version.h"
 #include "tensorflow/lite/c/common.h"
+#include <ArduinoBLE.h>
 
 
 // Globals, used for compatibility with Arduino-style sketches.
@@ -36,7 +37,6 @@ tflite::ErrorReporter* error_reporter = nullptr;
 const tflite::Model* model = nullptr;
 tflite::MicroInterpreter* interpreter = nullptr;
 TfLiteTensor* input = nullptr;
-
 // In order to use optimized tensorflow lite kernels, a signed int8_t quantized
 // model is preferred over the legacy unsigned model format. This means that
 // throughout this project, input images must be converted from unisgned to
@@ -45,12 +45,22 @@ TfLiteTensor* input = nullptr;
 // signed value.
 
 // An area of memory to use for input, output, and intermediate arrays.
-constexpr int kTensorArenaSize = 136 * 1024;
+constexpr int kTensorArenaSize = 100 * 1024;
 static uint8_t tensor_arena[kTensorArenaSize];
 }  // namespace
 
+
+BLEService signService("fff0");
+// One characteristic for the predicted letter
+BLECharCharacteristic signCharacteristic("fff1", BLERead | BLEWrite);
+// Optional ready/status characteristic
+BLECharCharacteristic statusCharacteristic("fff2", BLERead | BLEWrite);
+char currentPrediction = '?';
+char statusReady = 0x1;
+
 // The name of this function is important for Arduino compatibility.
 void setup() {
+  Serial.begin(9600);
   // Set up logging. Google style is to avoid globals or statics because of
   // lifetime uncertainty, but since this has a trivial destructor it's okay.
   // NOLINTNEXTLINE(runtime-global-variables)
@@ -103,10 +113,28 @@ void setup() {
 
   // // Get information about the memory area to use for the model's input.
   input = interpreter->input(0);
+  if (!BLE.begin()) {
+  Serial.println("starting Bluetooth Low Energy module failed!");
+  while (1);
+  }
+
+  signService.addCharacteristic(signCharacteristic);
+  signService.addCharacteristic(statusCharacteristic);
+  BLE.addService(signService);
+
+  BLE.setLocalName("SignDetector");
+
+  signCharacteristic.writeValue(currentPrediction);
+  statusCharacteristic.writeValue(statusReady);
+
+  BLE.advertise();
+
+  Serial.println("BLE advertising as SignDetector");
 }
 
 // The name of this function is important for Arduino compatibility.
 void loop() {
+  BLE.poll();
   // Get image from provider.
   if (kTfLiteOk != GetImage(error_reporter, kNumCols, kNumRows, kNumChannels,
                             input->data.int8)) {
@@ -129,6 +157,10 @@ void loop() {
     (output->data.int8[kBIndex] - output->params.zero_point) *
     output->params.scale;
 
+  //delay inference but maintain BLE connection
   RespondToDetection(error_reporter, a_prob, b_prob);
-  delay(1500);
+  for (int i = 0; i < 5; i++) {
+  BLE.poll();
+  delay(100);
+  }
 }

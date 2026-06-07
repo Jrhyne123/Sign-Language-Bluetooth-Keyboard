@@ -22,44 +22,34 @@ limitations under the License.
 #include "detection_responder.h"
 
 #include "Arduino.h"
+#include <ArduinoBLE.h>
+
+extern BLECharCharacteristic signCharacteristic;
+extern BLECharCharacteristic statusCharacteristic;
+
+extern char currentPrediction;
+extern char statusReady;
 
 // Flash the blue LED after each inference
 void RespondToDetection(tflite::ErrorReporter* error_reporter,
                         float a_prob, float b_prob) {
-  static bool is_initialized = false;
-  if (!is_initialized) {
-    // Pins for the built-in RGB LEDs on the Arduino Nano 33 BLE Sense
-    pinMode(LEDR, OUTPUT);
-    pinMode(LEDG, OUTPUT);
-    pinMode(LEDB, OUTPUT);
-    is_initialized = true;
-  }
 
-  // Note: The RGB LEDs on the Arduino Nano 33 BLE
-  // Sense are on when the pin is LOW, off when HIGH.
+  char prediction;
 
-  // Switch the person/not person LEDs off
-  digitalWrite(LEDG, HIGH);
-  digitalWrite(LEDR, HIGH);
-
-  // Flash the blue LED after every inference.
-  digitalWrite(LEDB, LOW);
-  delay(100);
-  digitalWrite(LEDB, HIGH);
-
-  // Switch on the green LED when a person is detected,
-  // the red when no person is detected
   if (a_prob > b_prob) {
-    digitalWrite(LEDG, LOW);
-    digitalWrite(LEDR, HIGH);
+    prediction = 'A';
     int a_percent = (int)(a_prob * 100.0f);
     TF_LITE_REPORT_ERROR(error_reporter, "Detected A, Probability: %d", a_percent);
   } else {
-    digitalWrite(LEDG, HIGH);
-    digitalWrite(LEDR, LOW);
+    prediction = 'B';
     int b_percent = (int)(b_prob * 100.0f);
     TF_LITE_REPORT_ERROR(error_reporter, "Detected B, Probability: %d", b_percent);
   }
+
+  // Send over BLE
+  currentPrediction = prediction;
+  signCharacteristic.writeValue(currentPrediction);
+  statusCharacteristic.writeValue(statusReady);
 
 }
 
